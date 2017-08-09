@@ -102,14 +102,7 @@ export default class extends Component {
   static propTypes = {
     horizontal: PropTypes.bool,
     children: PropTypes.node.isRequired,
-    containerStyle: PropTypes.oneOfType([
-      PropTypes.object,
-      PropTypes.number,
-    ]),
-    style: PropTypes.oneOfType([
-      PropTypes.object,
-      PropTypes.number,
-    ]),
+    style: ViewPropTypes.style,
     pagingEnabled: PropTypes.bool,
     showsHorizontalScrollIndicator: PropTypes.bool,
     showsVerticalScrollIndicator: PropTypes.bool,
@@ -132,9 +125,6 @@ export default class extends Component {
     activeDotStyle: PropTypes.object,
     dotColor: PropTypes.string,
     activeDotColor: PropTypes.string,
-    /**
-     * Called when the index has changed because the user swiped.
-     */
     onIndexChanged: PropTypes.func
   }
 
@@ -168,7 +158,7 @@ export default class extends Component {
    * Init states
    * @return {object} states
    */
-  state = this.initState(this.props)
+  state = this.initState(this.props, true)
 
   /**
    * autoplay timer
@@ -178,8 +168,10 @@ export default class extends Component {
   loopJumpTimer = null
 
   componentWillReceiveProps (nextProps) {
+    const sizeChanged = (nextProps.width || width) !== this.state.width ||
+                        (nextProps.height || height) !== this.state.height
     if (!nextProps.autoplay && this.autoplayTimer) clearTimeout(this.autoplayTimer)
-    this.setState(this.initState(nextProps))
+    this.setState(this.initState(nextProps, sizeChanged))
   }
 
   componentDidMount () {
@@ -196,7 +188,7 @@ export default class extends Component {
     if (this.state.index !== nextState.index) this.props.onIndexChanged(nextState.index)
   }
 
-  initState (props) {
+  initState (props, setOffsetInState) {
     // set the current state
     const state = this.state || {}
 
@@ -215,6 +207,8 @@ export default class extends Component {
       // retain the index
       initState.index = state.index
     } else {
+      // reset the index
+      setOffsetInState = true // if the index is reset, go ahead and update the offset in state
       initState.index = initState.total > 1 ? Math.min(props.index, initState.total - 1) : 0
     }
 
@@ -224,6 +218,22 @@ export default class extends Component {
     initState.height = props.height || height
     newInternals.offset = {}
 
+    if (initState.total > 1) {
+      let setup = initState.index
+      if (props.loop) {
+        setup++
+      }
+      newInternals.offset[initState.dir] = initState.dir === 'y'
+        ? initState.height * setup
+        : initState.width * setup
+    }
+
+    // only update the offset in state if needed, updating offset while swiping
+    // causes some bad jumping / stuttering
+    if (setOffsetInState) {
+      initState.offset = newInternals.offset
+    }
+
     this.internals = newInternals
     return initState
   }
@@ -231,29 +241,6 @@ export default class extends Component {
   // include internals with state
   fullState () {
     return Object.assign({}, this.state, this.internals)
-  }
-
-  onLayout = (event) => {
-    const { width, height } = event.nativeEvent.layout
-    const offset = this.internals.offset = {}
-    const state = { width, height }
-
-    if (this.state.total > 1) {
-      let setup = this.state.index
-      if (this.props.loop) {
-        setup++
-      }
-      offset[this.state.dir] = this.state.dir === 'y'
-        ? height * setup
-        : width * setup
-    }
-
-    // only update the offset in state if needed, updating offset while swiping
-    // causes some bad jumping / stuttering
-    if (width !== this.state.width || height !== this.state.height) {
-      state.offset = offset
-    }
-    this.setState(state)
   }
 
   loopJump = () => {
@@ -385,7 +372,7 @@ export default class extends Component {
       // Setting the offset to the same thing will not do anything,
       // so we increment it by 1 then immediately set it to what it should be,
       // after render.
-      if (offset[dir] === this.internals.offset[dir]) {
+      if (offset[dir] === this.state.offset[dir]) {
         newState.offset = { x: 0, y: 0 }
         newState.offset[dir] = offset[dir] + 1
         this.setState(newState, () => {
@@ -647,7 +634,10 @@ export default class extends Component {
     }
 
     return (
-      <View style={[styles.container, this.props.containerStyle]} onLayout={this.onLayout}>
+      <View style={[styles.container, {
+        width: state.width,
+        height: state.height
+      }]}>
         {this.renderScrollView(pages)}
         {props.showsPagination && (props.renderPagination
           ? this.props.renderPagination(state.index, state.total, this)
